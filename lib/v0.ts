@@ -1,6 +1,7 @@
 const V0_API_BASE = process.env.V0_PLATFORM_API_BASE || "https://api.v0.dev";
 const V0_API_KEY = process.env.V0_API_KEY;
 const V0_PROJECT_ID = process.env.V0_PROJECT_ID;
+const V0_PROJECT_NAME = process.env.V0_PROJECT_NAME || "v0-slackbot";
 const V0_MODEL_ID = process.env.V0_MODEL_ID || "v0-1.5-md";
 
 type V0ChatVersion = {
@@ -38,15 +39,66 @@ async function v0Fetch<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+let cachedProjectId: string | undefined;
+
+type V0Project = { id: string; name?: string; slug?: string };
+
+async function findProjectIdByName(name: string): Promise<string | undefined> {
+  // Best-effort search
+  try {
+    const res = await v0Fetch<{ projects?: V0Project[]; items?: V0Project[] }>(`/v1/projects`);
+    const list = (res.projects || res.items || []) as V0Project[];
+    const found = list.find((p) => (p.name || p.slug)?.toLowerCase() === name.toLowerCase());
+    return found?.id;
+  } catch {
+    return undefined;
+  }
+}
+
+async function createProjectByName(name: string): Promise<string | undefined> {
+  try {
+    const created = await v0Fetch<V0Project>(
+      "/v1/projects",
+      {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      },
+    );
+    return created.id;
+  } catch {
+    return undefined;
+  }
+}
+
+async function resolveProjectId(): Promise<string> {
+  if (cachedProjectId) return cachedProjectId;
+  if (V0_PROJECT_ID) {
+    cachedProjectId = V0_PROJECT_ID;
+    return cachedProjectId;
+  }
+  // Try to find by name, otherwise create
+  const found = await findProjectIdByName(V0_PROJECT_NAME);
+  if (found) {
+    cachedProjectId = found;
+    return found;
+  }
+  const created = await createProjectByName(V0_PROJECT_NAME);
+  if (created) {
+    cachedProjectId = created;
+    return created;
+  }
+  throw new Error("Could not resolve or create a v0 project. Set V0_PROJECT_ID or V0_PROJECT_NAME.");
+}
+
 async function createChat(prompt: string): Promise<V0Chat> {
-  if (!V0_PROJECT_ID) throw new Error("Missing V0_PROJECT_ID");
+  const projectId = await resolveProjectId();
   return v0Fetch<V0Chat>(
     "/v1/chats",
     {
       method: "POST",
       body: JSON.stringify({
         message: prompt,
-        projectId: V0_PROJECT_ID,
+        projectId,
         responseMode: "async",
         modelConfiguration: {
           modelId: V0_MODEL_ID,
@@ -98,7 +150,7 @@ export async function buildWithV0(prompt: string): Promise<{ chatId?: string; ve
   let webUrl: string | undefined;
   if (versionId) {
     const dep = await createDeployment({
-      projectId: V0_PROJECT_ID!,
+      projectId: await resolveProjectId(),
       chatId,
       versionId,
     });
