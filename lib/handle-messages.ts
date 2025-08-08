@@ -51,7 +51,11 @@ export async function handleNewAssistantMessage(
   await updateStatus("is thinking...");
 
   const messages = await getThread(channel, thread_ts, botUserId);
-  const result = await generateResponse(messages, updateStatus);
+  const threadKey = `${event.team}:${channel}:${thread_ts}`;
+  const result = await generateResponse(messages, updateStatus, {
+    threadKey,
+    maxSteps: 10,
+  });
 
   await client.chat.postMessage({
     channel: channel,
