@@ -62,6 +62,16 @@ export async function handleNewAppMention(
         chatId = newChatId;
       }
 
+      if (newChatId && !chatId) {
+        // Post the chatId literally into the thread for simple discovery later
+        await client.chat.postMessage({
+          channel,
+          thread_ts,
+          text: `[v0_chat_id: ${newChatId}]`,
+          unfurl_links: false,
+        });
+      }
+
       if (demoUrl) {
         await client.chat.postMessage({
           channel,
@@ -96,6 +106,14 @@ export async function handleNewAppMention(
           ts: updateMessage.initialMessageTs,
           text: "building a preview…",
           chatId,
+        });
+
+        // Also post it literally in the message for easy retrieval
+        await client.chat.postMessage({
+          channel,
+          thread_ts: event.ts,
+          text: `[v0_chat_id: ${chatId}]`,
+          unfurl_links: false,
         });
       }
 

@@ -141,6 +141,15 @@ export async function findThreadChatId(
     ) {
       return metadata.event_payload.chatId as string;
     }
+
+    // Fallback: parse chatId from literal message contents like: [v0_chat_id: <ID>]
+    const text: string | undefined = (message as any).text;
+    if (text) {
+      const match = text.match(/\[v0_chat_id:\s*([^\]\s]+)\]/i);
+      if (match && match[1]) {
+        return match[1];
+      }
+    }
   }
   return null;
 }
