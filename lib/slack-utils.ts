@@ -114,3 +114,54 @@ export const getBotId = async () => {
   }
   return botUserId;
 };
+
+/**
+ * Attempts to find a persisted v0 chatId in the Slack thread by scanning
+ * for a bot message that carries message metadata with event_type 'v0_chat'.
+ */
+export async function findThreadChatId(
+  channel_id: string,
+  thread_ts: string,
+): Promise<string | null> {
+  const { messages } = await client.conversations.replies({
+    channel: channel_id,
+    ts: thread_ts,
+    limit: 50,
+  });
+
+  if (!messages) return null;
+
+  for (const message of messages) {
+    const metadata: any = (message as any).metadata;
+    if (
+      metadata &&
+      metadata.event_type === "v0_chat" &&
+      metadata.event_payload &&
+      typeof metadata.event_payload.chatId === "string"
+    ) {
+      return metadata.event_payload.chatId as string;
+    }
+  }
+  return null;
+}
+
+/**
+ * Updates a specific Slack message with metadata containing the v0 chatId.
+ * Note: Slack requires 'text' on updates; provide the desired latest text.
+ */
+export async function updateMessageWithChatMetadata(params: {
+  channel: string;
+  ts: string;
+  text: string;
+  chatId: string;
+}) {
+  await client.chat.update({
+    channel: params.channel,
+    ts: params.ts,
+    text: params.text,
+    metadata: {
+      event_type: "v0_chat",
+      event_payload: { chatId: params.chatId },
+    } as any,
+  });
+}

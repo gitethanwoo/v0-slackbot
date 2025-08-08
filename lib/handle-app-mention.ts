@@ -1,9 +1,6 @@
 import { AppMentionEvent } from "@slack/web-api";
-import { client, getThread } from "./slack-utils";
-import { generateResponse } from "./generate-response";
-import { v0 } from "v0-sdk";
+import { client, getThread, findThreadChatId, updateMessageWithChatMetadata } from "./slack-utils";
 import { buildWithV0 } from "./v0";
-import { createMcpToolsForThread } from "./mcp-tools-adapter";
 
 const updateStatusUtil = async (
   initialStatus: string,
@@ -25,7 +22,7 @@ const updateStatusUtil = async (
       text: status,
     });
   };
-  return updateMessage;
+  return Object.assign(updateMessage, { initialMessageTs: initialMessage.ts as string });
 };
 
 export async function handleNewAppMention(
@@ -39,62 +36,47 @@ export async function handleNewAppMention(
   }
 
   const { thread_ts, channel } = event;
-  const updateMessage = await updateStatusUtil("Working on it…", event);
+  const updateMessage: any = await updateStatusUtil("Working on it…", event);
 
   if (thread_ts) {
-    // Use v0 to build a preview from the full thread context
+    // Use v0 to build or continue a chat from the full thread context
     const messages = await getThread(channel, thread_ts, botUserId);
-    const fullPrompt = messages.map((m) => `${m.role}: ${typeof m.content === "string" ? m.content : ""}`).join("\n");
+    const fullPrompt = messages
+      .map((m) => `${m.role}: ${typeof m.content === "string" ? m.content : ""}`)
+      .join("\n");
 
     await updateMessage("building a preview…");
     try {
-      // Prefer MCP tool if available, fallback to direct v0
-      const threadKey = `${(event as any).team}:${channel}:${thread_ts}`;
-      const mcpToolsResult = await createMcpToolsForThread(threadKey, { maxSteps: 10 });
-      const mcpTools = mcpToolsResult?.tools ?? {};
-      if (mcpTools["v0_build"]) {
-        try {
-          const result = await mcpTools["v0_build"].execute({ prompt: fullPrompt });
-          const parsed = typeof result === "string" ? JSON.parse(result) : result;
-          const demoUrl = parsed?.demoUrl;
-          const webUrl = parsed?.webUrl;
-          if (demoUrl) {
-            await client.chat.postMessage({
-              channel,
-              thread_ts,
-              text: `Preview is ready: ${demoUrl}`,
-              unfurl_links: false,
-            });
-          }
-          if (webUrl) {
-            await client.chat.postMessage({
-              channel,
-              thread_ts,
-              text: `Preview deployment: ${webUrl}`,
-              unfurl_links: false,
-            });
-          }
-        } finally {
-          if (mcpToolsResult?.close) await mcpToolsResult.close();
-        }
-      } else {
-        const { demoUrl, webUrl } = await buildWithV0(fullPrompt);
-        if (demoUrl) {
-          await client.chat.postMessage({
-            channel,
-            thread_ts,
-            text: `Preview is ready: ${demoUrl}`,
-            unfurl_links: false,
-          });
-        }
-        if (webUrl) {
-          await client.chat.postMessage({
-            channel,
-            thread_ts,
-            text: `Preview deployment: ${webUrl}`,
-            unfurl_links: false,
-          });
-        }
+      // Reuse existing chatId for this thread if present
+      let chatId: string | undefined = (await findThreadChatId(channel, thread_ts)) || undefined;
+
+      const { chatId: newChatId, demoUrl, webUrl } = await buildWithV0(fullPrompt, { chatId });
+
+      if (!chatId && newChatId && updateMessage.initialMessageTs) {
+        await updateMessageWithChatMetadata({
+          channel,
+          ts: updateMessage.initialMessageTs,
+          text: "building a preview…",
+          chatId: newChatId,
+        });
+        chatId = newChatId;
+      }
+
+      if (demoUrl) {
+        await client.chat.postMessage({
+          channel,
+          thread_ts,
+          text: `Preview is ready: ${demoUrl}`,
+          unfurl_links: false,
+        });
+      }
+      if (webUrl) {
+        await client.chat.postMessage({
+          channel,
+          thread_ts,
+          text: `Preview deployment: ${webUrl}`,
+          unfurl_links: false,
+        });
       }
 
       await updateMessage("done");
@@ -105,7 +87,17 @@ export async function handleNewAppMention(
     const prompt = event.text || "";
     await updateMessage("building a preview…");
     try {
-      const { demoUrl, webUrl } = await buildWithV0(prompt);
+      const { chatId, demoUrl, webUrl } = await buildWithV0(prompt);
+
+      // Persist chatId on the status message so follow-ups in this thread reuse it
+      if (chatId && updateMessage.initialMessageTs) {
+        await updateMessageWithChatMetadata({
+          channel,
+          ts: updateMessage.initialMessageTs,
+          text: "building a preview…",
+          chatId,
+        });
+      }
 
       if (demoUrl) {
         await client.chat.postMessage({

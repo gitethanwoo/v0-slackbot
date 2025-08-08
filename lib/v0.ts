@@ -1,15 +1,29 @@
 import { v0 } from "v0-sdk";
 
-export async function buildWithV0(prompt: string): Promise<{
+export async function buildWithV0(
+  prompt: string,
+  opts?: { chatId?: string }
+): Promise<{
+  chatId?: string;
   demoUrl?: string;
   webUrl?: string;
 }> {
-  const chat = await v0.chats.create({
-    message: prompt,
-  });
+  let chatResponse: any;
+  let effectiveChatId: string | undefined = opts?.chatId;
 
-  // Expecting URLs in the result shape; adjust parsing to your server’s response as needed
-  const demoUrl = (chat as any)?.demoUrl || (chat as any)?.demo_url;
-  const webUrl = (chat as any)?.webUrl || (chat as any)?.web_url;
-  return { demoUrl, webUrl };
+  if (effectiveChatId) {
+    // Continue existing chat
+    chatResponse = await v0.chats.sendMessage({ chatId: effectiveChatId, message: prompt });
+  } else {
+    // Start a new chat
+    chatResponse = await v0.chats.create({ message: prompt });
+    effectiveChatId =
+      chatResponse?.chatId || chatResponse?.id || chatResponse?.chat?.id || chatResponse?.chat?.chatId;
+  }
+
+  // Extract possible URLs in the result
+  const demoUrl = chatResponse?.demoUrl || chatResponse?.demo_url;
+  const webUrl = chatResponse?.webUrl || chatResponse?.web_url;
+
+  return { chatId: effectiveChatId, demoUrl, webUrl };
 }
