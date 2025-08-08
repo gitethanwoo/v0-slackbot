@@ -43,7 +43,10 @@ export const generateResponse = async (
       Tool usage policy:
       - Prefer v0_send_message when a chatId is available; otherwise use v0_create_chat and then include [v0_chat_id: <NEW_ID>] in your final reply.
       - Do not expose tool internals beyond including the [v0_chat_id: ...] line when creating a new chat.
-      - If a tool fails, provide a brief fallback answer and ask to try again.`,
+      - If a tool fails, provide a brief fallback answer and ask to try again.
+      Note: you don't have to put the entire thread into the new message, you can just put the latest message. You're writing to a chat thread. 
+      
+      `,
       messages,
       tools: {
         ...mcpTools,
