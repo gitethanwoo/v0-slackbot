@@ -44,7 +44,7 @@ export const generateResponse = async (
       - When tools return multiple links/fields, surface only preview/deployment links to the user. Never include chat links. SHOW THE DEMO URL!!!!! PEOPLE DON'T KNOW WHAT TO DO WITH THE OTHER LINKS.
       - Do not expose tool internals beyond including the [v0_chat_id: ...] line when creating a new chat.
       - If a tool fails, provide a brief fallback answer and ask to try again.
-      Note: you don't have to put the entire thread into the new message, you can just put the latest message. You're writing to a chat thread. 
+      Note: you don't have to put the entire thread into the new message, you can just put the latest message. You're writing to a chat thread. be concise in your response. 
       
       `,
       messages,

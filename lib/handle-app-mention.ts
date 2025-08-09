@@ -57,12 +57,6 @@ export async function handleNewAppMention(
       thread_ts: thread_ts ?? event.ts,
       text: result,
       unfurl_links: false,
-      blocks: [
-        {
-          type: "section",
-          text: { type: "mrkdwn", text: result },
-        },
-      ],
     });
 
     await updateMessage("done");

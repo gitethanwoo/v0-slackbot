@@ -45,15 +45,6 @@ export async function handleNewAssistantMessage(
     thread_ts: thread_ts,
     text: result,
     unfurl_links: false,
-    blocks: [
-      {
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: result,
-        },
-      },
-    ],
   });
 
   await updateStatus("");
