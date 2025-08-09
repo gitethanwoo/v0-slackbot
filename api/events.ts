@@ -32,15 +32,16 @@ export async function POST(request: Request) {
       waitUntil(assistantThreadMessage(event));
     }
 
-    if (
-      event.type === "message" &&
-      !event.subtype &&
-      event.channel_type === "im" &&
-      !event.bot_id &&
-      !event.bot_profile &&
-      event.bot_id !== botUserId
-    ) {
-      waitUntil(handleNewAssistantMessage(event, botUserId));
+    if (event.type === "message" && event.channel_type === "im") {
+      const hasSubtype = "subtype" in event && !!(event as any).subtype;
+      const hasBotId = "bot_id" in event && !!(event as any).bot_id;
+      const hasBotProfile = "bot_profile" in event && !!(event as any).bot_profile;
+      const isSameBot = "bot_id" in event && (event as any).bot_id === botUserId;
+
+      if (!hasSubtype && !hasBotId && !hasBotProfile && !isSameBot) {
+        // Cast to GenericMessageEvent for downstream handler which requires user messages
+        waitUntil(handleNewAssistantMessage(event as unknown as any, botUserId));
+      }
     }
 
     return new Response("Success!", { status: 200 });

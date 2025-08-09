@@ -1,8 +1,6 @@
 import { openai } from "@ai-sdk/openai";
-import { generateObject, generateText, stepCountIs } from "ai";
+import { generateText, stepCountIs, Output, jsonSchema, DeepPartial } from "ai";
 import { createMcpClient } from "./mcp-client";
-import { z } from "zod";
-
 
 export const generateResponse = async (
   messages: any[],
@@ -67,21 +65,34 @@ Tool usage policy:
 
       if (updateStatus) await updateStatus("structuring...");
 
-      const extractionSchema = z.object({
-        summary: z.string(),
-        followUps: z.array(z.string()).optional(),
-        link: z.string().url().optional(),
-      });
+      type StructuredOut = {
+        summary: string;
+        links?: string[];
+        followUps?: string[];
+      };
 
-      const { object } = await generateObject({
+      const structuredResult = await generateText<Record<string, never>, StructuredOut, DeepPartial<StructuredOut>>({
         model: openai("gpt-5"),
-        schema: extractionSchema,
-        prompt: `Extract a concise summary (1-3 sentences), follow-up questions if clarification is needed, and an actionable link if present from the assistant reply below. Only return the JSON object.\n\n--- Assistant reply start ---\n${lastAssistantText}\n--- Assistant reply end ---`,
+        prompt: `Extract a concise summary (1-3 sentences), a list of actionable links (if present), and follow-up questions that help clarify next steps from the assistant reply below. Return only these fields.\n\n--- Assistant reply start ---\n${lastAssistantText}\n--- Assistant reply end ---`,
+        experimental_output: Output.object({
+          schema: jsonSchema<StructuredOut>({
+            type: "object",
+            properties: {
+              summary: { type: "string" },
+              links: { type: "array", items: { type: "string" } },
+              followUps: { type: "array", items: { type: "string" } },
+            },
+            required: ["summary"],
+            additionalProperties: false,
+          }),
+        }),
       });
 
-      summary = object.summary;
-      followUps = Array.isArray(object.followUps) ? object.followUps : [];
-      link = object.link;
+      const extracted = structuredResult.experimental_output;
+      summary = extracted.summary;
+      followUps = extracted.followUps ?? [];
+      const linksArr = extracted.links ?? [];
+      if (linksArr.length > 0) link = linksArr[0];
 
       if (followUps.length > 0 || !!link) break;
       attempt += 1;
