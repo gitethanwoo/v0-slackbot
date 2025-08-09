@@ -24,6 +24,7 @@ export const generateResponse = async (
     let link: string | undefined;
 
     while (attempt < maxAttempts) {
+      console.log("[gen] attempt", attempt + 1, "of", maxAttempts);
       if (updateStatus) await updateStatus(attempt === 0 ? "is thinking..." : "gathering more info...");
 
       const systemPromptBase = `You are a Slack bot assistant. Your primary goal is to help the user building prototypes and ideas with v0. You do not have to necessarily pass everything to v0, you are allowed to chat, clarify, and help the user with their ideas before using your tools to build for the user. It can often be helpful to clarify what the user wants to build before using your tools to build for the user.
@@ -50,6 +51,7 @@ Tool usage policy:
         ? systemPromptBase
         : `${systemPromptBase}\n\nImportant: Ensure your reply includes at least one follow-up question or an actionable link if applicable.`;
 
+      console.log("[gen] calling generateText primary...");
       const textResult = await generateText({
         stopWhen: stepCountIs(10),
         model: openai("gpt-5"),
@@ -62,6 +64,7 @@ Tool usage policy:
       });
 
       lastAssistantText = textResult.text;
+      console.log("[gen] primary text length:", lastAssistantText?.length ?? 0);
 
       if (updateStatus) await updateStatus("structuring...");
 
@@ -71,6 +74,7 @@ Tool usage policy:
         followUps?: string[];
       };
 
+      console.log("[gen] calling generateText structured...");
       const structuredResult = await generateText<Record<string, never>, StructuredOut, DeepPartial<StructuredOut>>({
         model: openai("gpt-5"),
         prompt: `Extract a concise summary (1-3 sentences), a list of actionable links (if present), and follow-up questions that help clarify next steps from the assistant reply below. Return only these fields.\n\n--- Assistant reply start ---\n${lastAssistantText}\n--- Assistant reply end ---`,
@@ -89,17 +93,20 @@ Tool usage policy:
       });
 
       const extracted = structuredResult.experimental_output;
+      console.log("[gen] structured output:", extracted);
       summary = extracted.summary;
       followUps = extracted.followUps ?? [];
       const linksArr = extracted.links ?? [];
       if (linksArr.length > 0) link = linksArr[0];
 
+      console.log("[gen] extracted counts:", { followUps: followUps.length, links: linksArr.length });
       if (followUps.length > 0 || !!link) break;
       attempt += 1;
     }
 
     // Build Slack-friendly message
     const parts: string[] = [];
+    console.log("[gen] building Slack message. hasSummary:", !!summary, "hasLink:", !!link, "numFollowUps:", followUps.length);
     parts.push(`**Summary**: ${summary ?? (lastAssistantText ?? "")}`);
     if (link) parts.push(`**Link**: [Open](${link})`);
     if (followUps.length > 0) {
@@ -109,7 +116,9 @@ Tool usage policy:
 
     text = parts.join("\n\n");
   } finally {
+    console.log("[gen] cleaning up MCP client...");
     if (closeMcp) await closeMcp();
+    console.log("[gen] done.");
   }
 
   // Convert markdown to Slack mrkdwn format

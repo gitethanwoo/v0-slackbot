@@ -14,19 +14,19 @@ export async function isValidSlackRequest({
   request: Request
   rawBody: string
 }) {
-  // console.log('Validating Slack request')
+  console.log('[slack] Validating Slack request')
   const timestamp = request.headers.get('X-Slack-Request-Timestamp')
   const slackSignature = request.headers.get('X-Slack-Signature')
-  // console.log(timestamp, slackSignature)
+  console.log('[slack] timestamp, signature present?:', !!timestamp, !!slackSignature)
 
   if (!timestamp || !slackSignature) {
-    console.log('Missing timestamp or signature')
+    console.log('[slack] Missing timestamp or signature')
     return false
   }
 
   // Prevent replay attacks on the order of 5 minutes
   if (Math.abs(Date.now() / 1000 - parseInt(timestamp)) > 60 * 5) {
-    console.log('Timestamp out of range')
+    console.log('[slack] Timestamp out of range')
     return false
   }
 
@@ -38,6 +38,7 @@ export async function isValidSlackRequest({
   const computedSignature = `v0=${hmac}`
 
   // Prevent timing attacks
+  console.log('[slack] comparing signatures...')
   return crypto.timingSafeEqual(
     Buffer.from(computedSignature),
     Buffer.from(slackSignature)
@@ -61,6 +62,7 @@ export const verifyRequest = async ({
 
 export const updateStatusUtil = (channel: string, thread_ts: string) => {
   return async (status: string) => {
+    console.log('[slack] set status', { channel, thread_ts, status })
     await client.assistant.threads.setStatus({
       channel_id: channel,
       thread_ts: thread_ts,
@@ -79,6 +81,7 @@ export async function getThread(
     ts: thread_ts,
     limit: 50,
   });
+  console.log('[slack] fetched thread replies', { count: messages?.length ?? 0 })
 
   // Ensure we have messages
 
@@ -108,6 +111,7 @@ export async function getThread(
 
 export const getBotId = async () => {
   const { user_id: botUserId } = await client.auth.test();
+  console.log('[slack] botUserId', botUserId)
 
   if (!botUserId) {
     throw new Error("botUserId is undefined");
