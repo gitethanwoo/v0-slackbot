@@ -45,7 +45,7 @@ export const generateResponse = async (
 
       Tool usage policy:
       - Prefer v0_send_message when a chatId is available; otherwise use v0_create_chat and then include [v0_chat_id: <NEW_ID>] in your final reply.
-      - When tools return multiple links/fields, surface only preview/deployment links to the user. Never include chat links. Prefer in this order if present: demoUrl > previewUrl > webUrl > deploymentUrl. If multiple exist, show both demo and deployment.
+      - When tools return multiple links/fields, surface only preview/deployment links to the user. Never include chat links. SHOW THE DEMO URL!!!!! PEOPLE DON'T KNOW WHAT TO DO WITH THE OTHER LINKS.
       - Do not expose tool internals beyond including the [v0_chat_id: ...] line when creating a new chat.
       - If a tool fails, provide a brief fallback answer and ask to try again.
       Note: you don't have to put the entire thread into the new message, you can just put the latest message. You're writing to a chat thread. 
