@@ -1,6 +1,6 @@
 import { AppMentionEvent } from "@slack/web-api";
-import { client, getThread, findThreadChatId, updateMessageWithChatMetadata } from "./slack-utils";
-import { buildWithV0 } from "./v0";
+import { client, getThread } from "./slack-utils";
+import { generateResponse } from "./generate-response";
 
 const updateStatusUtil = async (
   initialStatus: string,
@@ -38,105 +38,39 @@ export async function handleNewAppMention(
   const { thread_ts, channel } = event;
   const updateMessage: any = await updateStatusUtil("Working on it…", event);
 
-  if (thread_ts) {
-    // Use v0 to build or continue a chat from the full thread context
-    const messages = await getThread(channel, thread_ts, botUserId);
-    const fullPrompt = messages
-      .map((m) => `${m.role}: ${typeof m.content === "string" ? m.content : ""}`)
-      .join("\n");
+  try {
+    const messages = thread_ts
+      ? await getThread(channel, thread_ts, botUserId)
+      : [
+          {
+            role: "user",
+            content: (event.text || "").replace(`<@${botUserId}> `, ""),
+          },
+        ];
 
-    await updateMessage("building a preview…");
-    try {
-      // Reuse existing chatId for this thread if present
-      let chatId: string | undefined = (await findThreadChatId(channel, thread_ts)) || undefined;
+    await updateMessage("is thinking...");
 
-      const { chatId: newChatId, demoUrl, webUrl } = await buildWithV0(fullPrompt, { chatId });
+    const threadKey = `${(event as any).team}:${channel}:${thread_ts ?? event.ts}`;
+    const result = await generateResponse(messages, updateMessage, {
+      threadKey,
+      maxSteps: 10,
+    });
 
-      if (!chatId && newChatId && updateMessage.initialMessageTs) {
-        await updateMessageWithChatMetadata({
-          channel,
-          ts: updateMessage.initialMessageTs,
-          text: "building a preview…",
-          chatId: newChatId,
-        });
-        chatId = newChatId;
-      }
+    await client.chat.postMessage({
+      channel,
+      thread_ts: thread_ts ?? event.ts,
+      text: result,
+      unfurl_links: false,
+      blocks: [
+        {
+          type: "section",
+          text: { type: "mrkdwn", text: result },
+        },
+      ],
+    });
 
-      if (newChatId && !chatId) {
-        // Post the chatId literally into the thread for simple discovery later
-        await client.chat.postMessage({
-          channel,
-          thread_ts,
-          text: `[v0_chat_id: ${newChatId}]`,
-          unfurl_links: false,
-        });
-      }
-
-      if (demoUrl) {
-        await client.chat.postMessage({
-          channel,
-          thread_ts,
-          text: `Preview is ready: ${demoUrl}`,
-          unfurl_links: false,
-        });
-      }
-      if (webUrl) {
-        await client.chat.postMessage({
-          channel,
-          thread_ts,
-          text: `Preview deployment: ${webUrl}`,
-          unfurl_links: false,
-        });
-      }
-
-      await updateMessage("done");
-    } catch (e: any) {
-      await updateMessage(`failed: ${e?.message || "unknown error"}`);
-    }
-  } else {
-    const prompt = event.text || "";
-    await updateMessage("building a preview…");
-    try {
-      const { chatId, demoUrl, webUrl } = await buildWithV0(prompt);
-
-      // Persist chatId on the status message so follow-ups in this thread reuse it
-      if (chatId && updateMessage.initialMessageTs) {
-        await updateMessageWithChatMetadata({
-          channel,
-          ts: updateMessage.initialMessageTs,
-          text: "building a preview…",
-          chatId,
-        });
-
-        // Also post it literally in the message for easy retrieval
-        await client.chat.postMessage({
-          channel,
-          thread_ts: event.ts,
-          text: `[v0_chat_id: ${chatId}]`,
-          unfurl_links: false,
-        });
-      }
-
-      if (demoUrl) {
-        await client.chat.postMessage({
-          channel,
-          thread_ts: event.ts,
-          text: `Preview is ready: ${demoUrl}`,
-          unfurl_links: false,
-        });
-      }
-
-      if (webUrl) {
-        await client.chat.postMessage({
-          channel,
-          thread_ts: event.ts,
-          text: `Preview deployment: ${webUrl}`,
-          unfurl_links: false,
-        });
-      }
-      await updateMessage("done");
-    } catch (e: any) {
-      await updateMessage(`failed: ${e?.message || "unknown error"}`);
-    }
+    await updateMessage("done");
+  } catch (e: any) {
+    await updateMessage(`failed: ${e?.message || "unknown error"}`);
   }
 }
