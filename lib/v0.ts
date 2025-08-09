@@ -22,8 +22,8 @@ export async function buildWithV0(
   }
 
   // Extract possible URLs in the result
-  const demoUrl = chatResponse?.demoUrl || chatResponse?.demo_url;
-  const webUrl = chatResponse?.webUrl || chatResponse?.web_url;
+  const demoUrl = chatResponse?.demoUrl || chatResponse?.demo_url || chatResponse?.previewUrl || chatResponse?.preview_url;
+  const webUrl = chatResponse?.webUrl || chatResponse?.web_url || chatResponse?.deploymentUrl || chatResponse?.deployment_url;
 
   return { chatId: effectiveChatId, demoUrl, webUrl };
 }
