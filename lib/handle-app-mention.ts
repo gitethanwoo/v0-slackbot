@@ -50,11 +50,7 @@ export async function handleNewAppMention(
 
     await updateMessage("is thinking...");
 
-    const threadKey = `${(event as any).team}:${channel}:${thread_ts ?? event.ts}`;
-    const result = await generateResponse(messages, updateMessage, {
-      threadKey,
-      maxSteps: 10,
-    });
+    const result = await generateResponse(messages, updateMessage);
 
     await client.chat.postMessage({
       channel,
