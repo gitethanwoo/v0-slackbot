@@ -1,6 +1,7 @@
 import { openai } from "@ai-sdk/openai";
-import { generateText, stepCountIs } from "ai";
+import { generateObject, generateText, stepCountIs } from "ai";
 import { createMcpClient } from "./mcp-client";
+import { z } from "zod";
 
 
 export const generateResponse = async (
@@ -17,45 +18,85 @@ export const generateResponse = async (
 
   let text: string;
   try {
-    const result = await generateText({
-      stopWhen: stepCountIs(10),
-      model: openai("gpt-5"),
-      system: `You are a Slack bot assistant. Your primary goal is to help the user building prototypes and ideas with v0. You do not have to necessarily pass everything to v0, you are allowed to chat, clarify, and help the user with their ideas before using your tools to build for the user. It can often be helpful to clarify what the user wants to build before using your tools to build for the user. 
+    const maxAttempts = 3;
+    let attempt = 0;
+    let lastAssistantText: string | null = null;
+    let summary: string | null = null;
+    let followUps: string[] = [];
+    let link: string | undefined;
 
-      If it's the first message, it's a good idea to reply with a plan of what you're going to do before you use v0_create_chat. and ask for confirmation. Use your web_search_preview tool to get a sense of documentation, latest releases, and clarification around potentially unclear information in the user's message. Use it to gather context and information before you use your tools to build for the user. Before building, 
+    while (attempt < maxAttempts) {
+      if (updateStatus) await updateStatus(attempt === 0 ? "is thinking..." : "gathering more info...");
 
-      Behavior:
-      - Keep responses concise and actionable. Do not tag users.
-      - Today is ${new Date().toISOString().split("T")[0]}.
-      - If you use web search, include sources inline where assertions are made.
+      const systemPromptBase = `You are a Slack bot assistant. Your primary goal is to help the user building prototypes and ideas with v0. You do not have to necessarily pass everything to v0, you are allowed to chat, clarify, and help the user with their ideas before using your tools to build for the user. It can often be helpful to clarify what the user wants to build before using your tools to build for the user.
 
-      Slack thread + v0 chat rules:
-      - If this conversation is within a Slack thread, you MUST continue the same v0 chat for that thread instead of starting a new one.
-      - To find the existing chat, scan the thread text for a literal token in any message like: [v0_chat_id: <ID>]. If present, use that chatId.
-      - If no chatId is present, create a new v0 chat and include a line in your reply with exactly: [v0_chat_id: <NEW_ID>] so future messages can reuse it.
+If it's the first message, it's a good idea to reply with a plan of what you're going to do before you use v0_create_chat and ask for confirmation. Use your web_search_preview tool to get a sense of documentation, latest releases, and clarification around potentially unclear information in the user's message. Use it to gather context and information before you use your tools to build for the user.
 
-      Tools you can call:
-      - v0_create_chat({ message, projectId?, system? }): creates a new v0 chat; returns JSON including a chat identifier (e.g. chatId or id).
-      - v0_send_message({ chatId, message }): sends a message to an existing v0 chat; use this whenever [v0_chat_id: ...] is available.
-      - v0_find_versions({ chatId }): list versions for the chat when helpful.
+Behavior:
+- Keep responses concise and actionable. Do not tag users.
+- Today is ${new Date().toISOString().split("T")[0]}.
+- If you use web search, include sources inline where assertions are made.
 
-      Tool usage policy:
-      - Prefer v0_send_message when a chatId is available; otherwise use v0_create_chat and then include [v0_chat_id: <NEW_ID>] in your final reply.
-      - When tools return multiple links/fields, surface only preview/deployment links to the user. Never include chat links. SHOW THE DEMO URL!!!!! PEOPLE DON'T KNOW WHAT TO DO WITH THE OTHER LINKS.
-      - Do not expose tool internals beyond including the [v0_chat_id: ...] line when creating a new chat.
-      - If a tool fails, provide a brief fallback answer and ask to try again.
-      Note: you don't have to put the entire thread into the new message, you can just put the latest message. You're writing to a chat thread. be concise in your response. 
-      
-      `,
-      messages,
-      tools: {
-        ...mcpTools,
-        web_search_preview: openai.tools.webSearchPreview({
-          searchContextSize: "medium",
-        }),
-      },
-    });
-    text = result.text;
+Slack thread + v0 chat rules:
+- If this conversation is within a Slack thread, you MUST continue the same v0 chat for that thread instead of starting a new one.
+- To find the existing chat, scan the thread text for a literal token in any message like: [v0_chat_id: <ID>]. If present, use that chatId.
+- If no chatId is present, create a new v0 chat and include a line in your reply with exactly: [v0_chat_id: <NEW_ID>] so future messages can reuse it.
+
+Tool usage policy:
+- Prefer v0_send_message when a chatId is available; otherwise use v0_create_chat and then include [v0_chat_id: <NEW_ID>] in your final reply.
+- When tools return multiple links/fields, surface only preview/deployment links to the user. Never include chat links. SHOW THE DEMO URL!!!!! PEOPLE DON'T KNOW WHAT TO DO WITH THE OTHER LINKS.
+- Do not expose tool internals beyond including the [v0_chat_id: ...] line when creating a new chat.
+- If a tool fails, provide a brief fallback answer and ask to try again.`;
+
+      const systemPrompt = attempt === 0
+        ? systemPromptBase
+        : `${systemPromptBase}\n\nImportant: Ensure your reply includes at least one follow-up question or an actionable link if applicable.`;
+
+      const textResult = await generateText({
+        stopWhen: stepCountIs(10),
+        model: openai("gpt-5"),
+        system: systemPrompt,
+        messages,
+        tools: {
+          ...mcpTools,
+          web_search_preview: openai.tools.webSearchPreview({ searchContextSize: "medium" }),
+        },
+      });
+
+      lastAssistantText = textResult.text;
+
+      if (updateStatus) await updateStatus("structuring...");
+
+      const extractionSchema = z.object({
+        summary: z.string(),
+        followUps: z.array(z.string()).optional(),
+        link: z.string().url().optional(),
+      });
+
+      const { object } = await generateObject({
+        model: openai("gpt-5"),
+        schema: extractionSchema,
+        prompt: `Extract a concise summary (1-3 sentences), follow-up questions if clarification is needed, and an actionable link if present from the assistant reply below. Only return the JSON object.\n\n--- Assistant reply start ---\n${lastAssistantText}\n--- Assistant reply end ---`,
+      });
+
+      summary = object.summary;
+      followUps = Array.isArray(object.followUps) ? object.followUps : [];
+      link = object.link;
+
+      if (followUps.length > 0 || !!link) break;
+      attempt += 1;
+    }
+
+    // Build Slack-friendly message
+    const parts: string[] = [];
+    parts.push(`**Summary**: ${summary ?? (lastAssistantText ?? "")}`);
+    if (link) parts.push(`**Link**: [Open](${link})`);
+    if (followUps.length > 0) {
+      const bullets = followUps.map((q) => `- ${q}`).join("\n");
+      parts.push(`**Follow-up questions**:\n${bullets}`);
+    }
+
+    text = parts.join("\n\n");
   } finally {
     if (closeMcp) await closeMcp();
   }
